@@ -203,10 +203,12 @@ const app = {
       try {
         await api('/rooms/' + room.id + '/join', { method: 'POST' });
         this.notify('已加入「' + room.name + '」');
-        this.openRoom(room.id);
       } catch (e) {
-        if (e.code === 40901) { this.openRoom(room.id); } else { this.fail(e); }
+        // 40901 表示已经加入过，直接进房间
+        if (e.code !== 40901) { this.fail(e); return; }
       }
+      // 关键：必须改 hash 触发路由，否则页面不会切到聊天视图
+      this.go('/rooms/' + room.id);
     },
     async openRoom(roomId) {
       try {
