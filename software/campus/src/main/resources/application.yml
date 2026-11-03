@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8080
 
 spring:
@@ -34,6 +34,12 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  agent:
+    llm-enabled: ${AI_ENABLED:false}
+    api-key: ${AI_API_KEY:}
+    base-url: ${AI_BASE_URL:https://api.deepseek.com/v1}
+    model: ${AI_MODEL:deepseek-chat}
+    timeout-seconds: 20
   jwt:
     secret: emhpeXUtY2FtcHVzLWRldi1zZWNyZXQta2V5LTMyYnl0ZXMhIQ==
     access-minutes: 120

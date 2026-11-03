@@ -81,8 +81,49 @@ java -jar target/campus-0.0.1-SNAPSHOT.jar
 | 博客 | `/posts*` | 发帖、回帖、点赞、收藏（均幂等） |
 | 检索 | `GET /search` | `score = 0.5×相关度 + 0.3×热度 + 0.2×偏好` |
 | AI | `GET /posts/{id}/ai-result` | 摘要、情感、自动打标、违规置信度 |
+| 智能体 | `POST /agent/chat` `/agent/info` | 总 agent 路由到聊天室/帖子/搜索三个子 agent |
 | 审核 | `/admin/review/*` | 待审列表、通过、删除、24 小时内撤销 |
 | 行为 | `POST /behaviors` | 浏览/停留/点赞等埋点，供偏好计算 |
+
+## AI 智能体（总 agent + 三个子 agent）
+
+`POST /api/v1/agent/chat` 用一句话就能驱动整个系统：
+
+```json
+{ "message": "在考研自习室说：大家好" }
+```
+
+返回里包含 `agent`（谁处理的）、`action`（做了什么）、`reply`（自然语言回复）、
+`trace`（路由过程：`router:rules->chat | model:local-rules`）。
+
+| 子 agent | 能做的事 | 示例 |
+|---|---|---|
+| `chat` | 查房间、加入、发消息、看记录 | 「有哪些聊天室」「在考研自习室说：你好」 |
+| `post` | 浏览、发帖、回帖 | 「看看最新帖子」「发帖 标题：xxx 内容：yyy」 |
+| `search` | 关键词检索并解释排序 | 「帮我搜一下高数」 |
+
+**路由方式**：配置了模型密钥就让模型判断意图，否则用关键词规则兜底。
+两种方式下，真正的动作都由子 agent 调用已有业务服务完成，**模型不直接碰数据库**。
+
+### 接入真实模型（OpenAI 兼容接口）
+
+默认关闭。设置环境变量后重启即可，代码不用改：
+
+```powershell
+$env:AI_ENABLED = "true"
+$env:AI_API_KEY = "sk-你的密钥"
+$env:AI_BASE_URL = "https://api.deepseek.com/v1"   # 通义、Moonshot 等同理
+$env:AI_MODEL    = "deepseek-chat"
+java -jar target/campus-0.0.1-SNAPSHOT.jar
+```
+
+调用 `/api/v1/agent/info` 可以看到当前用的是模型还是本地规则：
+
+```json
+{ "llmAvailable": true, "model": "deepseek-chat", "subAgents": ["chat","post","search"] }
+```
+
+> 模型不可用（超时、401、限流）时会自动降级到规则路由，不会让接口报错。
 
 ## 测试
 
