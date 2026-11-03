@@ -1,4 +1,4 @@
-﻿# 构建产物
+# 构建产物
 software/campus/target/
 software/campus/.mvn/wrapper/maven-wrapper.jar
 
@@ -21,3 +21,6 @@ __pycache__/
 
 # 打包产物
 *.zip
+
+# 交付物压缩包需要入库
+!deliverables/*.zip
