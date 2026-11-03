@@ -256,6 +256,13 @@ const app = {
     stopPolling() {
       if (this.timer) { clearInterval(this.timer); this.timer = null; }
     },
+    formatTime(value) {
+      if (!value) return '';
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return '';
+      const pad = n => (n < 10 ? '0' + n : '' + n);
+      return pad(d.getHours()) + ':' + pad(d.getMinutes());
+    },
 
     /* ---------------------------------------------------------- 博客 */
     async loadPosts() {
@@ -442,9 +449,13 @@ const app = {
         <div class="sub">{{ currentRoom.intro }} · {{ currentRoom.memberCount }} 人</div>
         <div class="msg-list">
           <el-empty v-if="messages.length === 0" description="还没有消息，说点什么" />
-          <div class="msg" v-for="m in messages" :key="m.id">
-            <div class="who">{{ m.senderNickname }}</div>
-            <div class="bubble">{{ m.content }}</div>
+          <div v-for="m in messages" :key="m.id" class="msg-row"
+               :class="{ mine: state.user && m.senderId === state.user.id }">
+            <div class="avatar">{{ (m.senderNickname || '?').slice(0, 1) }}</div>
+            <div class="msg-body">
+              <div class="msg-meta">{{ m.senderNickname }} · {{ formatTime(m.createdAt) }}</div>
+              <div class="bubble">{{ m.content }}</div>
+            </div>
           </div>
         </div>
         <div class="row" style="margin-top:12px">
