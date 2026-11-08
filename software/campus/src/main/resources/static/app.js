@@ -14,11 +14,19 @@ async function api(path, options) {
   const opt = options || {};
   const headers = { 'Content-Type': 'application/json' };
   if (state.token) headers.Authorization = 'Bearer ' + state.token;
-  const res = await fetch(API + path, {
-    method: opt.method || 'GET',
-    headers,
-    body: opt.body ? JSON.stringify(opt.body) : undefined
-  });
+  let res;
+  try {
+    res = await fetch(API + path, {
+      method: opt.method || 'GET',
+      headers,
+      body: opt.body ? JSON.stringify(opt.body) : undefined
+    });
+  } catch (e) {
+    // 浏览器原生只会说 "Failed to fetch"，这里翻译成用户能懂的提示
+    const err = new Error('连不上后端服务。请确认：1) 后端已启动；2) 你访问的是 http://127.0.0.1:8080 而不是直接打开 html 文件');
+    err.status = 0;
+    throw err;
+  }
   let json = null;
   try { json = await res.json(); } catch (e) { json = null; }
   if (!res.ok || (json && json.code !== 0)) {
@@ -611,7 +619,7 @@ const app = {
   template: `
 <div>
   <div class="topbar" v-if="loggedIn">
-    <div class="brand">知屿校园<span class="ver">v16</span></div>
+    <div class="brand">知屿校园<span class="ver">v17</span></div>
     <div class="nav">
       <a :href="'#/posts'" :class="{active: ['posts','post'].includes(route.name)}">博客</a>
       <a :href="'#/rooms'" :class="{active: ['rooms','chat'].includes(route.name)}">聊天室</a>
