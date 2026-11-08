@@ -76,6 +76,7 @@ const app = {
       msgText: '',
       uploading: false,
       pending: null,
+      uiAi: true,           // AI 界面开关
       aiOpen: false,
       aiInput: '',
       aiLoading: false,
@@ -106,6 +107,9 @@ const app = {
       myRooms: [],
       editDialog: false,
       profileNickname: '',
+      pwdOld: '',
+      pwdNew: '',
+      pwdConfirm: '',
       reviewRemark: {}
     };
   },
@@ -587,6 +591,17 @@ const app = {
     },
     async saveProfile() {
       try {
+        // 1) 改密码（填了才处理）
+        if (this.pwdNew || this.pwdOld) {
+          if (!this.pwdOld || !this.pwdNew) throw new Error('改密码需要同时填原口令和新口令');
+          if (this.pwdNew !== this.pwdConfirm) throw new Error('两次输入的新口令不一致');
+          await api('/users/me/password', {
+            method: 'POST',
+            body: { oldPassword: this.pwdOld, newPassword: this.pwdNew }
+          });
+          this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
+        }
+        // 2) 改昵称
         const u = await api('/users/me', {
           method: 'PUT',
           body: { nickname: this.profileNickname }
@@ -594,7 +609,7 @@ const app = {
         state.user.nickname = u.nickname;
         localStorage.setItem(USER_KEY, JSON.stringify(state.user));
         this.editDialog = false;
-        this.notify('资料已更新');
+        this.notify('已保存');
       } catch (e) { this.fail(e); }
     },
     async loadPending() {
@@ -619,12 +634,13 @@ const app = {
   template: `
 <div>
   <div class="topbar" v-if="loggedIn">
-    <div class="brand">知屿校园<span class="ver">v18</span></div>
+    <div class="brand">知屿校园<span class="ver">v23</span></div>
     <div class="nav">
       <a :href="'#/posts'" :class="{active: ['posts','post'].includes(route.name)}">博客</a>
       <a :href="'#/rooms'" :class="{active: ['rooms','chat'].includes(route.name)}">聊天室</a>
       <a :href="'#/search'" :class="{active: route.name === 'search'}">检索</a>
       <a :href="'#/me'" :class="{active: route.name === 'me'}">我的</a>
+      <a v-if="uiAi" href="#" @click.prevent="aiOpen = !aiOpen" :class="{active: aiOpen}">AI</a>
       <a v-if="isAdmin" :href="'#/review'" :class="{active: route.name === 'review'}">审核台</a>
     </div>
     <div class="who">
@@ -968,6 +984,16 @@ const app = {
       <el-form-item label="昵称">
         <el-input v-model="profileNickname" maxlength="32" />
       </el-form-item>
+      <el-form-item label="原口令（改密码时填）">
+        <el-input v-model="pwdOld" type="password" show-password placeholder="不改密码就留空" />
+      </el-form-item>
+      <el-form-item label="新口令">
+        <el-input v-model="pwdNew" type="password" show-password
+                  placeholder="8 位以上，含字母和数字" />
+      </el-form-item>
+      <el-form-item label="确认新口令">
+        <el-input v-model="pwdConfirm" type="password" show-password />
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="editDialog = false">取消</el-button>
@@ -1000,12 +1026,12 @@ const app = {
   </el-dialog>
 
   <!-- AI 助手 -->
-  <div class="ai-fab" :style="fabStyle" @mousedown="startFabDrag"
+  <div v-if="uiAi" class="ai-fab" :style="fabStyle" @mousedown="startFabDrag"
        :title="aiOpen ? '收起' : '打开 AI 助手（可拖动）'">
     {{ aiOpen ? '×' : 'AI' }}
   </div>
 
-  <div class="ai-box" v-if="aiOpen" ref="aiBox" :style="aiStyle">
+  <div v-if="uiAi && aiOpen" class="ai-box" ref="aiBox" :style="aiStyle">
     <div class="ai-head" @mousedown="startDrag">
       <div class="ai-head-row">
         <span>AI 助手</span>
@@ -1046,4 +1072,38 @@ const app = {
 `
 };
 
-createApp(app).use(ElementPlus).mount('#app');
+/**
+ * 启动引导：手机上 Element Plus（1 MB）可能加载失败或超时，
+ * 直接 createApp 会抛 "Can't find variable: ElementPlus" 然后白屏。
+ * 这里先确认依赖就绪，没就绪就重试加载，实在不行给提示。
+ */
+function boot(tries) {
+  const hasVue = typeof window.Vue !== 'undefined' && !!window.Vue.createApp;
+  const hasEP = typeof window.ElementPlus !== 'undefined';
+
+  if (hasVue && hasEP) {
+    window.Vue.createApp(app).use(window.ElementPlus).mount('#app');
+    const tip = document.getElementById('boot-tip');
+    if (tip) tip.remove();
+    return;
+  }
+
+  if (tries <= 0) {
+    const tip = document.getElementById('boot-tip');
+    if (tip) {
+      tip.innerHTML = '界面库加载失败。<br>请检查网络后刷新，或点这里 <a href="javascript:location.reload()">重新加载</a>。';
+      tip.style.color = '#a8071a';
+    }
+    return;
+  }
+
+  // 缺谁补谁
+  if (!hasEP) {
+    const s = document.createElement('script');
+    s.src = '/vendor/element-plus.full.js?retry=' + Date.now();
+    document.body.appendChild(s);
+  }
+  setTimeout(() => boot(tries - 1), 1200);
+}
+
+boot(6);

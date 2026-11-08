@@ -5,12 +5,22 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+import re
+
 from .. import db, errors
+from ..security import hash_password, verify_password
 from ..deps import current_user
 
 router = APIRouter(prefix="/api/v1/users/me", tags=["个人中心"])
 
+PASSWORD_RULE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d).{8,64}$")
+
 STATUS_TEXT = {0: "正常", 1: "待审", 2: "已删除"}
+
+
+class PasswordIn(BaseModel):
+    oldPassword: str = Field(min_length=1, max_length=64)
+    newPassword: str = Field(min_length=8, max_length=64)
 
 
 class ProfileIn(BaseModel):
@@ -48,6 +58,23 @@ def update_profile(body: ProfileIn, user: dict = Depends(current_user)):
     db.execute(f"UPDATE `user` SET {', '.join(sets)} WHERE id=%s", tuple(args))
     row = db.query_one("SELECT * FROM `user` WHERE id=%s", (user["id"],))
     return errors.ok(_user_vo(row))
+
+
+@router.post("/password")
+def change_password(body: PasswordIn, user: dict = Depends(current_user)):
+    """修改自己的口令：校验原口令 + 强度 + 不能与旧的相同。"""
+    row = db.query_one("SELECT * FROM `user` WHERE id=%s", (user["id"],))
+    if not row:
+        raise errors.ApiError(errors.CODE_NOT_FOUND, "用户不存在")
+    if not verify_password(body.oldPassword, row["password_hash"]):
+        raise errors.ApiError(errors.CODE_UNAUTHORIZED, "原口令不正确")
+    if not PASSWORD_RULE.match(body.newPassword):
+        raise errors.ApiError(errors.CODE_PARAM, "新口令需 8~64 位且同时包含字母与数字")
+    if body.oldPassword == body.newPassword:
+        raise errors.ApiError(errors.CODE_PARAM, "新口令不能与原口令相同")
+    db.execute("UPDATE `user` SET password_hash=%s WHERE id=%s",
+               (hash_password(body.newPassword), user["id"]))
+    return errors.ok()
 
 
 @router.get("/posts")

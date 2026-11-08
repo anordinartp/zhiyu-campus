@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>知屿校园 · 校园信息智能平台</title>
   <link rel="stylesheet" href="/vendor/element-plus.css">
-  <link rel="stylesheet" href="/style.css?v=18">
+  <link rel="stylesheet" href="/style.css?v=23">
 </head>
 <body>
   <div id="app"></div>
+  <div id="boot-tip" style="position:fixed;left:0;right:0;top:45%;text-align:center;
+       color:#8492a6;font:14px/1.8 'Microsoft YaHei',sans-serif;">
+    正在加载界面…<br><span style="font-size:12px">首次打开需要下载约 300 KB</span>
+  </div>
   <script>
     // 出错时把信息直接显示出来，避免"白屏但不知道为什么"
     window.onerror = function (msg, src, line, col) {
@@ -28,7 +32,7 @@
     });
   </script>
   <script src="/vendor/vue.global.prod.js"></script>
-  <script src="/vendor/element-plus.full.js"></script>
-  <script src="/app.js?v=18"></script>
+  <script src="/vendor/element-plus.full.js" onerror="console.warn('element-plus 加载失败，将由 app.js 重试')"></script>
+  <script src="/app.js?v=23"></script>
 </body>
 </html>
