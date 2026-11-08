@@ -9,6 +9,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -17,6 +18,8 @@ from . import errors
 from .routers import admin, agent, auth, files, me, posts, rooms, search
 
 app = FastAPI(title="知屿校园 API（Python 版）", version="1.0.0")
+
+app.add_middleware(GZipMiddleware, minimum_size=800)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +34,10 @@ async def no_cache_static(request: Request, call_next):
     """开发期禁用静态资源缓存，避免改了页面浏览器还在用旧的。"""
     response = await call_next(request)
     path = request.url.path.lower()
-    if path.endswith((".html", ".js", ".css")) or path == "/":
+    if path.startswith("/vendor/"):
+        # 第三方库几乎不变，让浏览器长期缓存，第二次打开就不用再下 1MB
+        response.headers["Cache-Control"] = "public, max-age=604800"
+    elif path.endswith((".html", ".js", ".css")) or path == "/":
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response

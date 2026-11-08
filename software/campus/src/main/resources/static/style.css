@@ -410,3 +410,62 @@ body {
 .ai-drag-hint { font-size: 10px; color: #b0b8c4; }
 .ai-drag-hint a { color: #4f81bd; text-decoration: none; }
 .ai-drag-hint a:hover { text-decoration: underline; }
+/* ==================== 手机适配 ==================== */
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    padding: 8px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .topbar .brand { font-size: 16px; }
+  .topbar .nav { gap: 4px; flex-wrap: wrap; }
+  .topbar .nav a { padding: 5px 10px; font-size: 13px; }
+  .topbar .who { font-size: 12px; gap: 8px; }
+
+  .page { margin: 12px auto; padding: 0 10px 90px; }
+
+  .card { padding: 14px; border-radius: 8px; margin-bottom: 12px; }
+  .card h2 { font-size: 15px; }
+
+  .row { gap: 8px; }
+
+  .msg-list { height: 46vh; padding: 8px; }
+  .msg-row .avatar { width: 30px; height: 30px; font-size: 13px; }
+  .msg-body { max-width: 84%; }
+  .msg-img { max-width: 100%; }
+
+  .login-card { width: auto; margin: 0 16px; padding: 22px; }
+  .center-box { padding: 20px 0; }
+
+  /* AI 面板铺满宽度，不再固定 360 */
+  .ai-box {
+    left: 10px !important;
+    right: 10px !important;
+    top: auto !important;
+    bottom: 84px !important;
+    width: auto !important;
+    height: 62vh;
+  }
+  .ai-fab {
+    right: 16px !important;
+    bottom: 16px !important;
+    left: auto !important;
+    top: auto !important;
+  }
+  .ai-head { cursor: default; }
+  .ai-drag-hint { display: none; }
+
+  /* 表格类（帖子列表行）让文字换行不溢出 */
+  .post-title { font-size: 15px; }
+  .list-row { flex-wrap: wrap; }
+}
+
+/* 很窄的手机 */
+@media (max-width: 380px) {
+  .topbar .nav a { padding: 4px 8px; font-size: 12px; }
+  .msg-body { max-width: 88%; }
+}

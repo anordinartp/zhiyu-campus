@@ -294,7 +294,7 @@ const app = {
           const page = await api('/rooms/' + roomId + '/messages?limit=20');
           this.messages = page.items || [];
         } catch (e) { /* 轮询失败静默处理 */ }
-      }, 4000);
+      }, 8000);
     },
     stopPolling() {
       if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -619,7 +619,7 @@ const app = {
   template: `
 <div>
   <div class="topbar" v-if="loggedIn">
-    <div class="brand">知屿校园<span class="ver">v17</span></div>
+    <div class="brand">知屿校园<span class="ver">v18</span></div>
     <div class="nav">
       <a :href="'#/posts'" :class="{active: ['posts','post'].includes(route.name)}">博客</a>
       <a :href="'#/rooms'" :class="{active: ['rooms','chat'].includes(route.name)}">聊天室</a>
