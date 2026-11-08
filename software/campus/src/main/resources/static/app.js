@@ -24,6 +24,7 @@ async function api(path, options) {
   if (!res.ok || (json && json.code !== 0)) {
     const err = new Error((json && json.message) || ('请求失败：HTTP ' + res.status));
     err.status = res.status;
+    err.code = json && json.code;   // 业务错误码，用于区分 40901 等场景
     if (res.status === 401) {
       state.token = '';
       state.user = null;
@@ -63,6 +64,7 @@ const app = {
       currentRoom: null,
       messages: [],
       msgText: '',
+      uploading: false,
       msgCursor: null,
       timer: null,
 
@@ -207,8 +209,10 @@ const app = {
         // 40901 表示已经加入过，直接进房间
         if (e.code !== 40901) { this.fail(e); return; }
       }
-      // 关键：必须改 hash 触发路由，否则页面不会切到聊天视图
-      this.go('/rooms/' + room.id);
+      // 双保险：既改 hash（地址栏可分享），也直接切换视图状态
+      location.hash = '#/rooms/' + room.id;
+      this.route = { name: 'chat', roomId: room.id };
+      this.openRoom(room.id);
     },
     async openRoom(roomId) {
       try {
@@ -255,6 +259,33 @@ const app = {
     },
     stopPolling() {
       if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    },
+    async uploadImage(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      this.uploading = true;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/v1/files', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + state.token },
+          body: form
+        });
+        const json = await res.json();
+        if (!res.ok || json.code !== 0) throw new Error(json.message || '上传失败');
+        await api('/rooms/' + this.currentRoom.id + '/messages', {
+          method: 'POST',
+          body: { msgType: 2, content: json.data.url }
+        });
+        await this.loadMessages();
+        this.notify('图片已发送');
+      } catch (err) {
+        this.fail(err);
+      } finally {
+        this.uploading = false;
+        ev.target.value = '';
+      }
     },
     formatTime(value) {
       if (!value) return '';
@@ -359,7 +390,7 @@ const app = {
   template: `
 <div>
   <div class="topbar" v-if="loggedIn">
-    <div class="brand">知屿校园</div>
+    <div class="brand">知屿校园<span class="ver">v5</span></div>
     <div class="nav">
       <a :href="'#/posts'" :class="{active: ['posts','post'].includes(route.name)}">博客</a>
       <a :href="'#/rooms'" :class="{active: ['rooms','chat'].includes(route.name)}">聊天室</a>
@@ -454,11 +485,15 @@ const app = {
             <div class="avatar">{{ (m.senderNickname || '?').slice(0, 1) }}</div>
             <div class="msg-body">
               <div class="msg-meta">{{ m.senderNickname }} · {{ formatTime(m.createdAt) }}</div>
-              <div class="bubble">{{ m.content }}</div>
+              <div class="bubble" v-if="m.msgType !== 2">{{ m.content }}</div>
+              <img v-else class="msg-img" :src="m.content" alt="图片" />
             </div>
           </div>
         </div>
         <div class="row" style="margin-top:12px">
+          <input ref="fileInput" type="file" accept="image/*" style="display:none"
+                 @change="uploadImage" />
+          <el-button :loading="uploading" @click="$refs.fileInput.click()">图片</el-button>
           <el-input class="grow" v-model="msgText" placeholder="说点什么…（Enter 发送）"
                     @keyup.enter="sendMessage" />
           <el-button type="primary" @click="sendMessage">发送</el-button>

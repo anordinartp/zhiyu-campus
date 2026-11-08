@@ -235,3 +235,19 @@ body {
   background: #d9f0c4;
   border-color: #c3e6a4;
 }
+.brand .ver {
+  font-size: 11px;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.25);
+  vertical-align: middle;
+}
+
+.msg-img {
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 8px;
+  display: block;
+  border: 1px solid #e6eaf2;
+}
