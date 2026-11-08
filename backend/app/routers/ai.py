@@ -6,7 +6,7 @@
 
 from datetime import datetime
 
-from .. import db, errors
+from .. import db, errors, llm
 
 TAG_KEYWORDS = {
     "考研": "考研", "高数": "考研", "选课": "选课", "期末": "选课",
@@ -18,8 +18,35 @@ HARD = ["代写", "代考", "赌博", "毒品", "枪", "色情", "诈骗"]
 SOFT = ["收费", "私聊报价", "包过", "内部渠道"]
 
 
+
+MODEL_PROMPT = (
+    "你是校园社区的内容审核助手。读下面这篇帖子，输出一行 JSON，字段：\n"
+    "summary   一句话摘要，不超过 60 字\n"
+    "sentiment 情感：1 正面 / 0 中性 / -1 负面\n"
+    "violation 是否可能违规：true / false\n"
+    "confidence 违规置信度，0~1 的小数\n"
+    "tags      从这些标签中选 0~3 个：考研、选课、实习、社团、二手、求助\n"
+    "只输出 JSON，不要解释。"
+)
+
+
 def _analyze(title: str, body: str) -> dict:
+    """优先用模型；没密钥或调用失败时退回本地规则。"""
     text = (title or "") + (body or "")
+
+    if llm.available():
+        out = llm.chat_json(MODEL_PROMPT, f"标题：{title}\n正文：{body}")
+        if out:
+            try:
+                return {
+                    "summary": str(out.get("summary", ""))[:120],
+                    "sentiment": int(out.get("sentiment", 0)),
+                    "violation": bool(out.get("violation", False)),
+                    "confidence": float(out.get("confidence", 0.0)),
+                    "tags": [t for t in (out.get("tags") or []) if t in TAG_KEYWORDS.values()],
+                }
+            except Exception as exc:
+                print(f"[ai] 模型结果解析失败，用规则：{exc}")
     summary = (body or "").strip()
     if len(summary) > 60:
         summary = summary[:60] + "…"

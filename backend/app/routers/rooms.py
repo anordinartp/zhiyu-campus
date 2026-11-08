@@ -246,6 +246,25 @@ def list_messages(room_id: int, cursor: int | None = None, limit: int = 20,
     })
 
 
+@router.post("/{room_id}/messages/{msg_id}/recall")
+def recall_message(room_id: int, msg_id: int, user: dict = Depends(current_user)):
+    """撤回自己的消息：仅限发送者本人、2 分钟内、未撤回。"""
+    from datetime import timedelta
+
+    row = db.query_one(
+        "SELECT * FROM message WHERE id=%s AND room_id=%s", (msg_id, room_id))
+    if not row:
+        raise errors.ApiError(errors.CODE_NOT_FOUND, "消息不存在")
+    if row["sender_id"] != user["id"]:
+        raise errors.ApiError(errors.CODE_FORBIDDEN, "只能撤回自己发的消息")
+    if row["status"] != 0:
+        raise errors.ApiError(errors.CODE_CONFLICT, "该消息已不可撤回")
+    if row["created_at"] + timedelta(minutes=2) < datetime.now():
+        raise errors.ApiError(errors.CODE_FORBIDDEN, "超过 2 分钟，无法撤回")
+    db.execute("UPDATE message SET status=2 WHERE id=%s", (msg_id,))
+    return errors.ok()
+
+
 @router.post("/{room_id}/messages")
 def send_message(room_id: int, body: MessageIn, user: dict = Depends(current_user)):
     room = _room_or_404(room_id)
@@ -258,8 +277,8 @@ def send_message(room_id: int, body: MessageIn, user: dict = Depends(current_use
 
     if body.msgType == 1 and len(body.content) > 2000:
         raise errors.ApiError(errors.CODE_PARAM, "content 长度不能超过 2000 字")
-    if body.msgType == 2 and not body.content.startswith("/uploads/"):
-        raise errors.ApiError(errors.CODE_PARAM, "图片消息需先上传，content 应为 /uploads/ 开头的地址")
+    if body.msgType in (2, 3) and not body.content.startswith("/uploads/"):
+        raise errors.ApiError(errors.CODE_PARAM, "图片/文件消息需先上传，content 应为 /uploads/ 开头的地址")
 
     now = datetime.now()
     msg_id = db.execute(

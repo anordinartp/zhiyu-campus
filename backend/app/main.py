@@ -9,12 +9,12 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import errors
-from .routers import admin, agent, auth, files, posts, rooms, search
+from .routers import admin, agent, auth, files, me, posts, rooms, search
 
 app = FastAPI(title="知屿校园 API（Python 版）", version="1.0.0")
 
@@ -24,6 +24,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """开发期禁用静态资源缓存，避免改了页面浏览器还在用旧的。"""
+    response = await call_next(request)
+    path = request.url.path.lower()
+    if path.endswith((".html", ".js", ".css")) or path == "/":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.middleware("http")
@@ -71,6 +82,7 @@ app.include_router(search.router)
 app.include_router(admin.router)
 app.include_router(agent.router)
 app.include_router(files.router)
+app.include_router(me.router)
 
 
 
@@ -81,7 +93,19 @@ def api_not_found(path: str):
 # 上传的图片
 _UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
 os.makedirs(_UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=_UPLOAD_DIR), name="uploads")
+
+
+@app.get("/uploads/{name}")
+def serve_upload(name: str, download: int = 0):
+    """图片默认内嵌显示，加 ?download=1 变为下载；其他文件一律下载。"""
+    safe = os.path.basename(name)
+    path = os.path.join(_UPLOAD_DIR, safe)
+    if not os.path.isfile(path):
+        raise errors.ApiError(errors.CODE_NOT_FOUND, "文件不存在")
+    image = safe.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
+    if image and not download:
+        return FileResponse(path)
+    return FileResponse(path, filename=safe, content_disposition_type="attachment")
 
 # ------------------------------------------------------------ 前端静态文件
 # 复用 Java 版那套前端，路径不用改

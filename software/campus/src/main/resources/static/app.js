@@ -30,6 +30,8 @@ async function api(path, options) {
       state.user = null;
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
+      // 关键：令牌失效必须回到登录页，否则页面空白且没有任何提示
+      if (location.hash !== '#/login') location.hash = '#/login';
     }
     throw err;
   }
@@ -65,6 +67,13 @@ const app = {
       messages: [],
       msgText: '',
       uploading: false,
+      pending: null,
+      aiOpen: false,
+      aiInput: '',
+      aiLoading: false,
+      aiMessages: [],
+      aiPos: null,
+      fabPos: null,
       msgCursor: null,
       timer: null,
 
@@ -82,10 +91,35 @@ const app = {
       searchResults: [],
 
       pending: [],
+      meTab: 'posts',
+      meStats: { posts: 0, favorites: 0, rooms: 0, likes: 0, replies: 0 },
+      myPosts: [],
+      myFavorites: [],
+      myRooms: [],
+      editDialog: false,
+      profileNickname: '',
       reviewRemark: {}
     };
   },
   computed: {
+    fabStyle() {
+      if (!this.fabPos) return {};
+      return {
+        left: this.fabPos.x + 'px',
+        top: this.fabPos.y + 'px',
+        right: 'auto',
+        bottom: 'auto'
+      };
+    },
+    aiStyle() {
+      if (!this.aiPos) return {};
+      return {
+        left: this.aiPos.x + 'px',
+        top: this.aiPos.y + 'px',
+        right: 'auto',
+        bottom: 'auto'
+      };
+    },
     isAdmin() {
       return this.state.user && this.state.user.role === 2;
     },
@@ -94,6 +128,12 @@ const app = {
     }
   },
   mounted() {
+    try {
+      const saved = localStorage.getItem('zy_ai_pos');
+      if (saved) this.aiPos = JSON.parse(saved);
+      const savedFab = localStorage.getItem('zy_ai_fab');
+      if (savedFab) this.fabPos = JSON.parse(savedFab);
+    } catch (e) { /* 忽略损坏的位置数据 */ }
     window.addEventListener('hashchange', this.syncRoute);
     if (!this.loggedIn) {
       location.hash = '#/login';
@@ -124,6 +164,7 @@ const app = {
       if (name === 'post') this.openPost(this.route.postId);
       if (name === 'search') this.doSearch();
       if (name === 'review') this.loadPending();
+      if (name === 'me') this.loadMe();
     },
     async bootstrap() {
       try {
@@ -236,17 +277,7 @@ const app = {
         this.msgCursor = page.nextCursor;
       } catch (e) { this.fail(e); }
     },
-    async sendMessage() {
-      if (!this.msgText.trim()) return;
-      try {
-        await api('/rooms/' + this.currentRoom.id + '/messages', {
-          method: 'POST',
-          body: { content: this.msgText, msgType: 1 }
-        });
-        this.msgText = '';
-        await this.loadMessages();
-      } catch (e) { this.fail(e); }
-    },
+
     startPolling(roomId) {
       this.stopPolling();
       this.timer = setInterval(async () => {
@@ -260,13 +291,43 @@ const app = {
     stopPolling() {
       if (this.timer) { clearInterval(this.timer); this.timer = null; }
     },
-    async uploadImage(ev) {
+    pickFile(kind) {
+      if (kind === 'image') this.$refs.fileInput.click();
+      else this.$refs.docInput.click();
+    },
+    onFileChosen(ev, kind) {
       const file = ev.target.files && ev.target.files[0];
       if (!file) return;
+      // 关键：只暂存，不发送。点“发送”才真正上传
+      this.pending = { file, kind, name: file.name, size: file.size };
+      ev.target.value = '';
+    },
+    cancelPending() {
+      this.pending = null;
+      this.notify('已取消', 'info');
+    },
+    async sendMessage() {
+      // 先处理待发送的附件
+      if (this.pending) {
+        await this.sendPending();
+        return;
+      }
+      if (!this.msgText.trim()) return;
+      try {
+        await api('/rooms/' + this.currentRoom.id + '/messages', {
+          method: 'POST',
+          body: { content: this.msgText, msgType: 1 }
+        });
+        this.msgText = '';
+        await this.loadMessages();
+      } catch (e) { this.fail(e); }
+    },
+    async sendPending() {
+      const p = this.pending;
       this.uploading = true;
       try {
         const form = new FormData();
-        form.append('file', file);
+        form.append('file', p.file);
         const res = await fetch('/api/v1/files', {
           method: 'POST',
           headers: { Authorization: 'Bearer ' + state.token },
@@ -276,16 +337,31 @@ const app = {
         if (!res.ok || json.code !== 0) throw new Error(json.message || '上传失败');
         await api('/rooms/' + this.currentRoom.id + '/messages', {
           method: 'POST',
-          body: { msgType: 2, content: json.data.url }
+          body: { msgType: p.kind === 'image' ? 2 : 3, content: json.data.url }
         });
+        this.pending = null;
         await this.loadMessages();
-        this.notify('图片已发送');
+        this.notify(p.kind === 'image' ? '图片已发送' : '文件已发送');
       } catch (err) {
         this.fail(err);
       } finally {
         this.uploading = false;
-        ev.target.value = '';
       }
+    },
+    async recall(m) {
+      try {
+        await api('/rooms/' + this.currentRoom.id + '/messages/' + m.id + '/recall',
+                  { method: 'POST' });
+        this.notify('已撤回');
+        await this.loadMessages();
+      } catch (e) { this.fail(e); }
+    },
+    fileName(url) {
+      if (!url) return '文件';
+      const base = String(url).split('/').pop();
+      // 存盘名形如 20261108-ab12cd34-原文件名.pdf，去掉前缀日期与随机串
+      const m = base.match(/^\d{8}-[0-9a-f]+-(.*)$/);
+      return m ? decodeURIComponent(m[1]) : decodeURIComponent(base);
     },
     formatTime(value) {
       if (!value) return '';
@@ -368,6 +444,151 @@ const app = {
     },
 
     /* ---------------------------------------------------------- 审核 */
+    startFabDrag(e) {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const offX = startX - rect.left;
+      const offY = startY - rect.top;
+      let moved = false;
+
+      const move = (ev) => {
+        if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 4) {
+          return;                       // 小于 4px 当作点击，不算拖动
+        }
+        moved = true;
+        const size = 48;
+        const x = Math.min(Math.max(0, ev.clientX - offX), window.innerWidth - size);
+        const y = Math.min(Math.max(0, ev.clientY - offY), window.innerHeight - size);
+        this.fabPos = { x: x, y: y };
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        if (moved) {
+          localStorage.setItem('zy_ai_fab', JSON.stringify(this.fabPos));
+        } else {
+          this.toggleAI();              // 没拖动就是点击
+        }
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+      e.preventDefault();
+    },
+    toggleAI() {
+      this.aiOpen = !this.aiOpen;
+      // 圆球被拖到别处时，面板贴着它展开
+      if (this.aiOpen && !this.aiPos && this.fabPos) {
+        this.aiPos = {
+          x: Math.max(8, Math.min(this.fabPos.x - 312, window.innerWidth - 368)),
+          y: Math.max(8, this.fabPos.y - 470)
+        };
+      }
+    },
+    startDrag(e) {
+      const box = this.$refs.aiBox;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      const offsetX = e.clientX - rect.left;
+      const offsetY = e.clientY - rect.top;
+
+      const move = (ev) => {
+        const x = Math.min(Math.max(0, ev.clientX - offsetX), window.innerWidth - 120);
+        const y = Math.min(Math.max(0, ev.clientY - offsetY), window.innerHeight - 80);
+        this.aiPos = { x: x, y: y };
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        if (this.aiPos) {
+          localStorage.setItem('zy_ai_pos', JSON.stringify(this.aiPos));
+        }
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+      e.preventDefault();
+    },
+    resetAIPos() {
+      this.aiPos = null;
+      localStorage.removeItem('zy_ai_pos');
+    },
+    aiContext() {
+      const ctx = {};
+      if (this.route.name === 'chat' && this.currentRoom) {
+        ctx.page = 'chat';
+        ctx.roomId = this.currentRoom.id;
+      } else if (this.route.name === 'post' && this.currentPost) {
+        ctx.page = 'post';
+        ctx.postId = this.currentPost.id;
+      } else {
+        ctx.page = this.route.name || 'unknown';
+      }
+      return ctx;
+    },
+    aiContextText() {
+      if (this.route.name === 'chat' && this.currentRoom) {
+        return '当前聊天室：' + this.currentRoom.name;
+      }
+      if (this.route.name === 'post' && this.currentPost) {
+        return '当前帖子：' + this.currentPost.title;
+      }
+      return '当前页面：' + (this.route.name || '');
+    },
+    async askAI() {
+      const text = this.aiInput.trim();
+      if (!text || this.aiLoading) return;
+      this.aiMessages.push({ role: 'user', text: text });
+      this.aiInput = '';
+      this.aiLoading = true;
+      try {
+        const ctx = this.aiContext();
+        const res = await api('/agent/chat', {
+          method: 'POST',
+          body: { message: text, context: ctx }
+        });
+        this.aiMessages.push({
+          role: 'ai',
+          text: res.reply,
+          agent: res.agent,
+          trace: (res.trace || []).join(' | ')
+        });
+      } catch (e) {
+        this.aiMessages.push({ role: 'ai', text: '出错了：' + e.message, agent: 'error' });
+      } finally {
+        this.aiLoading = false;
+        this.$nextTick(() => {
+          const box = this.$refs.aiList;
+          if (box) box.scrollTop = box.scrollHeight;
+        });
+      }
+    },
+    async loadMe() {
+      try {
+        const [stats, posts, favs, rooms] = await Promise.all([
+          api('/users/me/stats'),
+          api('/users/me/posts'),
+          api('/users/me/favorites'),
+          api('/users/me/rooms')
+        ]);
+        this.meStats = stats || this.meStats;
+        this.myPosts = posts || [];
+        this.myFavorites = favs || [];
+        this.myRooms = rooms || [];
+        this.profileNickname = state.user.nickname;
+      } catch (e) { this.fail(e); }
+    },
+    async saveProfile() {
+      try {
+        const u = await api('/users/me', {
+          method: 'PUT',
+          body: { nickname: this.profileNickname }
+        });
+        state.user.nickname = u.nickname;
+        localStorage.setItem(USER_KEY, JSON.stringify(state.user));
+        this.editDialog = false;
+        this.notify('资料已更新');
+      } catch (e) { this.fail(e); }
+    },
     async loadPending() {
       try {
         this.pending = await api('/admin/review/tasks');
@@ -390,11 +611,12 @@ const app = {
   template: `
 <div>
   <div class="topbar" v-if="loggedIn">
-    <div class="brand">知屿校园<span class="ver">v5</span></div>
+    <div class="brand">知屿校园<span class="ver">v16</span></div>
     <div class="nav">
       <a :href="'#/posts'" :class="{active: ['posts','post'].includes(route.name)}">博客</a>
       <a :href="'#/rooms'" :class="{active: ['rooms','chat'].includes(route.name)}">聊天室</a>
       <a :href="'#/search'" :class="{active: route.name === 'search'}">检索</a>
+      <a :href="'#/me'" :class="{active: route.name === 'me'}">我的</a>
       <a v-if="isAdmin" :href="'#/review'" :class="{active: route.name === 'review'}">审核台</a>
     </div>
     <div class="who">
@@ -471,6 +693,11 @@ const app = {
     </div>
 
     <!-- 聊天界面 -->
+    <div v-if="route.name === 'chat' && !currentRoom" class="card">
+      <h2>无法打开聊天室</h2>
+      <div class="sub">可能房间不存在，或你还没有加入</div>
+      <el-button type="primary" @click="go('/rooms')">返回聊天室列表</el-button>
+    </div>
     <div v-if="route.name === 'chat' && currentRoom">
       <div class="card">
         <div class="row">
@@ -485,18 +712,38 @@ const app = {
             <div class="avatar">{{ (m.senderNickname || '?').slice(0, 1) }}</div>
             <div class="msg-body">
               <div class="msg-meta">{{ m.senderNickname }} · {{ formatTime(m.createdAt) }}</div>
-              <div class="bubble" v-if="m.msgType !== 2">{{ m.content }}</div>
-              <img v-else class="msg-img" :src="m.content" alt="图片" />
+              <div class="bubble" v-if="m.msgType === 1">{{ m.content }}</div>
+              <div v-else-if="m.msgType === 2" class="img-box">
+                <a :href="m.content" target="_blank">
+                  <img class="msg-img" :src="m.content" alt="图片" />
+                </a>
+                <a class="save-link" :href="m.content + '?download=1'" download>保存图片</a>
+              </div>
+              <a v-else class="file-bubble" :href="m.content" :download="fileName(m.content)">
+                📎 {{ fileName(m.content) }}
+              </a>
+              <div class="recall" v-if="state.user && m.senderId === state.user.id"
+                   @click="recall(m)">撤回</div>
             </div>
           </div>
         </div>
+        <div class="pending-box" v-if="pending">
+          <span class="pending-name">
+            待发送：{{ pending.kind === 'image' ? '图片' : '文件' }} · {{ pending.name }}
+            （{{ (pending.size / 1024).toFixed(1) }} KB）
+          </span>
+          <el-button size="small" @click="cancelPending">取消</el-button>
+        </div>
         <div class="row" style="margin-top:12px">
           <input ref="fileInput" type="file" accept="image/*" style="display:none"
-                 @change="uploadImage" />
-          <el-button :loading="uploading" @click="$refs.fileInput.click()">图片</el-button>
+                 @change="onFileChosen($event, 'image')" />
+          <input ref="docInput" type="file" style="display:none"
+                 @change="onFileChosen($event, 'file')" />
+          <el-button @click="pickFile('image')">图片</el-button>
+          <el-button @click="pickFile('file')">文件</el-button>
           <el-input class="grow" v-model="msgText" placeholder="说点什么…（Enter 发送）"
                     @keyup.enter="sendMessage" />
-          <el-button type="primary" @click="sendMessage">发送</el-button>
+          <el-button type="primary" :loading="uploading" @click="sendMessage">发送</el-button>
         </div>
       </div>
     </div>
@@ -606,6 +853,65 @@ const app = {
       </div>
     </div>
 
+    <!-- 个人中心 -->
+    <div v-if="route.name === 'me'">
+      <div class="card">
+        <div class="row">
+          <div class="avatar-lg">{{ (state.user && state.user.nickname || '?').slice(0, 1) }}</div>
+          <div class="grow">
+            <div style="font-size:18px;font-weight:600">{{ state.user ? state.user.nickname : '' }}</div>
+            <div class="muted">
+              发帖 {{ meStats.posts }} · 收藏 {{ meStats.favorites }} ·
+              聊天室 {{ meStats.rooms }} · 点赞 {{ meStats.likes }} · 回帖 {{ meStats.replies }}
+            </div>
+          </div>
+          <el-button @click="editDialog = true">编辑资料</el-button>
+        </div>
+      </div>
+
+      <div class="card">
+        <el-tabs v-model="meTab">
+          <el-tab-pane label="我的帖子" name="posts">
+            <el-empty v-if="myPosts.length === 0" description="还没发过帖子" />
+            <div v-for="p in myPosts" :key="p.id" class="list-row">
+              <div class="grow">
+                <div class="post-title" @click="go('/posts/' + p.id)">{{ p.title }}</div>
+                <div class="muted">{{ p.boardName }} · 浏览 {{ p.viewCount }} · 赞 {{ p.likeCount }}</div>
+              </div>
+              <el-tag size="small"
+                      :type="p.status === 0 ? 'success' : (p.status === 1 ? 'warning' : 'info')">
+                {{ p.statusText }}
+              </el-tag>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="我的收藏" name="favorites">
+            <el-empty v-if="myFavorites.length === 0" description="还没收藏内容" />
+            <div v-for="p in myFavorites" :key="p.id" class="list-row">
+              <div class="grow">
+                <div class="post-title" @click="go('/posts/' + p.id)">{{ p.title }}</div>
+                <div class="muted">{{ p.boardName }} · 赞 {{ p.likeCount }}</div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="我的聊天室" name="rooms">
+            <el-empty v-if="myRooms.length === 0" description="还没加入聊天室" />
+            <div v-for="r in myRooms" :key="r.id" class="list-row">
+              <div class="grow">
+                <div class="post-title" @click="go('/rooms/' + r.id)">{{ r.name }}</div>
+                <div class="muted">{{ r.memberCount }} 人 ·
+                  {{ r.myRole === 2 ? '群主' : (r.myRole === 1 ? '管理员' : '成员') }}
+                  <span v-if="r.myMuted === 1"> · 已禁言</span>
+                </div>
+              </div>
+              <el-button size="small" @click="go('/rooms/' + r.id)">进入</el-button>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </div>
+
     <!-- 审核台 -->
     <div v-if="route.name === 'review'">
       <div class="card">
@@ -648,6 +954,19 @@ const app = {
     </template>
   </el-dialog>
 
+  <!-- 编辑资料 -->
+  <el-dialog v-model="editDialog" title="编辑资料" width="420px">
+    <el-form label-position="top">
+      <el-form-item label="昵称">
+        <el-input v-model="profileNickname" maxlength="32" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editDialog = false">取消</el-button>
+      <el-button type="primary" @click="saveProfile">保存</el-button>
+    </template>
+  </el-dialog>
+
   <!-- 发帖 -->
   <el-dialog v-model="postDialog" title="发帖" width="560px">
     <el-form label-position="top">
@@ -671,6 +990,50 @@ const app = {
       <el-button type="primary" @click="createPost">发布</el-button>
     </template>
   </el-dialog>
+
+  <!-- AI 助手 -->
+  <div class="ai-fab" :style="fabStyle" @mousedown="startFabDrag"
+       :title="aiOpen ? '收起' : '打开 AI 助手（可拖动）'">
+    {{ aiOpen ? '×' : 'AI' }}
+  </div>
+
+  <div class="ai-box" v-if="aiOpen" ref="aiBox" :style="aiStyle">
+    <div class="ai-head" @mousedown="startDrag">
+      <div class="ai-head-row">
+        <span>AI 助手</span>
+        <span class="ai-drag-hint">按住拖动 · <a @click.stop="resetAIPos" href="#">复位</a></span>
+      </div>
+      <span class="ai-sub">{{ aiContextText() }}</span>
+    </div>
+    <div class="ai-list" ref="aiList">
+      <div v-if="aiMessages.length === 0" class="ai-empty">
+        试试问我：<br>
+        · 有哪些聊天室<br>
+        · 看看最新帖子<br>
+        · 帮我搜一下高数<br>
+        · 总结一下当前聊天室<br>
+        · 这篇帖子讲了什么
+      </div>
+      <div v-for="(m, i) in aiMessages" :key="i" :class="['ai-msg', m.role]">
+        <div class="ai-bubble">{{ m.text }}</div>
+        <div class="ai-meta" v-if="m.agent">
+          <el-tag size="small"
+                  :type="m.agent === 'chat' ? 'success' : (m.agent === 'post' ? 'warning' : 'info')">
+            {{ m.agent }}
+          </el-tag>
+          <span class="ai-trace">{{ m.trace }}</span>
+        </div>
+      </div>
+      <div v-if="aiLoading" class="ai-msg ai">
+        <div class="ai-bubble">思考中…</div>
+      </div>
+    </div>
+    <div class="ai-input">
+      <el-input v-model="aiInput" placeholder="说一句话，Enter 发送"
+                @keyup.enter="askAI" size="small" />
+      <el-button type="primary" size="small" :loading="aiLoading" @click="askAI">发送</el-button>
+    </div>
+  </div>
 </div>
 `
 };

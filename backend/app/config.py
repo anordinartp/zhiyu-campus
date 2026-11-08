@@ -5,6 +5,13 @@
 
 import os
 
+# 可选：从 backend/.env 读取本地配置（密钥放这里，不进 Git）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+except Exception:
+    pass
+
 # ---------------------------------------------------------------- 服务
 HOST = os.getenv("APP_HOST", "0.0.0.0")
 PORT = int(os.getenv("APP_PORT", "8000"))
